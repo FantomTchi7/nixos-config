@@ -7,15 +7,7 @@ in
     lib.mkEnableOption "the primary AMD GPU (Mesa, early KMS, overdrive, LACT)";
 
   config = lib.mkIf cfg.enable {
-    hardware.graphics = {
-      enable = true;
-      enable32Bit = true;
-    };
-
-    hardware.amdgpu = {
-      initrd.enable = true;
-      overdrive.enable = true;
-    };
+    hardware.amdgpu.overdrive.enable = true;
 
     services.lact.enable = true;
 

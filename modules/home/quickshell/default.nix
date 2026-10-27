@@ -11,10 +11,6 @@ in
       enable = true;
       configs.default = ./config;
       activeConfig = "default";
-      systemd = {
-        enable = true;
-        target = "graphical-session.target";
-      };
     };
   };
 }

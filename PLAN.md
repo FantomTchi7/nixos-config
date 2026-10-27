@@ -7,6 +7,35 @@
 - `programs.gamescope.capSysNice = false`, because the capability wrapper fails inside Steam's bubblewrap sandbox. ananicy-cpp handles process priorities instead.
 - The Quickshell bar shows workspaces and a clock only. Tray and volume widgets, and click-to-switch workspaces, are added after it runs on hardware.
 - No NVENC apps (OBS, ffmpeg-full) are installed yet. The driver and `nvidia-smi` are in place.
+
+**Changes made while filling in host values from the live USB (2026-10-27):**
+- Host data is no longer placeholders: `hardware.nix` generated on the machine (1 TB Kingston
+  NVMe, filesystems by UUID), `primaryPciAddress = "0000:08:00.0"` (RX 6900 XT; the GTX 1050 Ti
+  is at `0000:04:00.0`), and the Gigabyte M27Q at 2560x1440@170 -- on DP-2, matched by EDID.
+- Personal values left the repo without weakening the declarative setup: they live in a
+  gitignored `.env`, parsed at eval time by `lib/env.nix` and handed to every module as the
+  `env` special arg. `mutableUsers` is still `false`. The `secrets/` folder is gone.
+  Because a flake only sees git-tracked files, every command uses a `path:` reference.
+
+**Changes made on 2026-10-27 (second pass):**
+- `lib/vars.nix` is gone. `USERNAME`, `LOCALE` and `KEYBOARD_LAYOUT` moved into `.env`
+  alongside `PASSWORD_HASH`, `TIMEZONE` and `SSH_KEY`, so there is one place for host
+  identity instead of two. `lib/env.nix` now throws if `.env` is absent or if a required
+  key is empty, replacing the old "no password" warning: `users.users.<user>.hashedPassword`
+  is set unconditionally from `env.PASSWORD_HASH`. `TIMEZONE` and `SSH_KEY` may be empty.
+- `services.fstrim.enable = true` dropped from `hosts/YUV-PC/default.nix` as redundant:
+  nixpkgs already defaults the option to `true` and nixos-hardware's `common-pc-ssd` sets
+  `mkDefault true`, so the weekly timer runs either way. The btrfs mounts keep `nodiscard`,
+  which turns off the `discard=async` btrfs has done by default since kernel 6.2, so TRIM
+  happens in one weekly batch instead of continuously. This is a deliberate deviation from
+  CachyOS, whose installer mounts btrfs on SSD with `defaults,noatime,compress=zstd:1` and
+  leaves async discard on (`gucc/src/partition_config.cpp`, `get_default_mount_opts`);
+  batch trim avoids the idle NVMe activity async discard can cause.
+- Hyprland owns the session keyboard layout (`conf/input.lua`), so Nix no longer injects
+  `kb_layout` and `services.xserver.xkb.layout` is gone. `vars.keyboardLayout` is now only
+  `console.keyMap` for the TTY and tuigreet. The generated `hyprland.lua` carries no settings
+  from Nix at all.
+
 **Complexity**: Large. Phases 1–6 give a usable gaming desktop. Phases 7–9 are VFIO, Secure Boot and ARM.
 **Repo state**: empty. There are no existing patterns to follow, so this plan sets the conventions.
 
@@ -16,14 +45,14 @@
 
 | # | Requirement | What this config does |
 |---|---|---|
-| 1 | Flake, installable with `nixos-install` from a live USB | `nixos-install --flake .#YUV-PC --no-root-passwd` from the stock NixOS ISO. Partitioning is declarative (disko). |
+| 1 | Flake, installable with `nixos-install` from a live USB | `nixos-install --flake .#YUV-PC --no-root-passwd` from the stock NixOS ISO. The disk is partitioned by hand (gdisk) and the filesystems come from `nixos-generate-config`, so nothing in a running system depends on how the disk was prepared. |
 | 2 | Modular, ARM later (with kernel compilation), x86_64 first | `mkHost { system = …; }` helper. Modules sit behind `my.*` options. A reusable custom-kernel module also covers cross-compiling for aarch64. |
-| 3 | Secret encryption planned, not now | Every secret-shaped value lives in `secrets/` and is read through `*File` options. Moving to sops-nix later only touches that folder. |
+| 3 | Secret encryption planned, not now | Username, locale, keymap, password hash, time zone and SSH keys live in one gitignored file, `.env`, written on the live USB before installing and parsed by `lib/env.nix`. Nothing personal is committed and no extra dependency is introduced; rebuilds use a `path:` flake reference so untracked files are visible. sops-nix would cover the password and keys but **not** `time.timeZone`, which is an eval-time value — see section 10. |
 | 4 | CachyOS gaming optimizations | CachyOS kernel (nix-cachyos-kernel), scx, ananicy-cpp + CachyOS rules, zram, and the CachyOS-Settings values **checked against upstream** (section 4). |
 | 5 | EAC Linux v2: as close as possible, kept simple | **One boot entry**, no draft kernel. It turns on the requirements that cost nothing (Secure Boot, TPM, BPF LSM, kexec off, IOMMU in translated mode). It does not enforce lockdown or module signatures, because those would reject the unsigned NVIDIA module (section 6). |
 | 6 | Emulation + single-GPU passthrough | KVM/libvirt hooks hand the **RX 6900 XT** to a Windows 11 guest. The guest has a TPM, Secure Boot, hugepages and CPU pinning so anti-cheat games run where their anti-cheat allows VMs. The GTX 1050 Ti stays on the host for NVENC. aarch64 binfmt is included. |
 | 7 | Home Manager | NixOS module, `release-26.05`. |
-| 8 | nixos-hardware | `gigabyte-b550`, `common-cpu-amd`, `common-cpu-amd-pstate`, `common-gpu-amd`, `common-pc`, `common-pc-ssd`. |
+| 8 | nixos-hardware | `gigabyte-b550`, `common-cpu-amd-pstate` (which imports `common-cpu-amd`), `common-gpu-amd`, `common-pc`, `common-pc-ssd`. Not `common-cpu-amd-zenpower`: its package does not build against a Clang kernel, so `my.hardware.zenpower` carries a patched one. |
 | 9 | Hyprland **configured in Lua**, Quickshell (nixpkgs), greetd autologin | Hyprland 0.55.4 (in 26.05; this is the first release with Lua config), HM `configType = "lua"`, `pkgs.quickshell`, greetd `initial_session`. |
 | 10 | PipeWire | For now: PipeWire with ALSA, PulseAudio and JACK, and nothing else. |
 | 11 | No root password | `root.hashedPassword = "!"`, `--no-root-passwd`, admin access only through `wheel`. |
@@ -41,12 +70,11 @@ nixos-config/
 ├── flake.lock
 ├── lib/
 │   ├── default.nix               # mkHost
-│   └── vars.nix                  # username = "fantomtchi7"; timezone; locale
+│   └── env.nix                   # parses and validates the gitignored .env
 ├── hosts/
 │   ├── YUV-PC/
 │   │   ├── default.nix           # imports + my.* toggles
-│   │   ├── hardware.nix          # from nixos-generate-config --no-filesystems
-│   │   ├── disko.nix             # GPT + ESP + btrfs subvolumes
+│   │   ├── hardware.nix          # from nixos-generate-config (incl. fileSystems)
 │   │   ├── gpu.nix               # PCI addresses of 6900 XT functions + 1050 Ti
 │   │   └── vms/win11.xml         # reference libvirt domain (not auto-defined)
 │   └── arm-board/                # stub (Phase 9)
@@ -71,9 +99,6 @@ nixos-config/
 ├── users/fantomtchi7/home.nix
 ├── overlays/default.nix          # pkgs.unstable + local pkgs
 ├── pkgs/                         # iommu-groups, eac-status
-├── secrets/
-│   ├── README.md                 # sops-nix migration path
-│   └── fantomtchi7.hash          # plaintext yescrypt hash, not encrypted yet
 └── PLAN.md
 ```
 
@@ -94,7 +119,6 @@ nixos-config/
 | `home-manager` | `github:nix-community/home-manager/release-26.05` | follows `nixpkgs` |
 | `nixos-hardware` | `github:NixOS/nixos-hardware` | |
 | `nix-cachyos-kernel` | `github:xddxdd/nix-cachyos-kernel/release` | **Do not** make it follow nixpkgs. Use `overlays.pinned` so builds come from its binary cache. |
-| `disko` | `github:nix-community/disko` | follows `nixpkgs` |
 | `lanzaboote` | `github:nix-community/lanzaboote/<release tag>` | Added in Phase 8 |
 
 Binary caches: `cache.nixos.org`, `nix-community.cachix.org`, and `https://cache.lantian.pub/lantian` with key `lantian:WVGO7vsRMSEN+h7Lp7kv6SAmrkEXgUGbbXm7jMDjBuQ=`.
@@ -105,7 +129,10 @@ Binary caches: `cache.nixos.org`, `nix-community.cachix.org`, and `https://cache
 
 ## 4. CachyOS Settings: Checked Against Upstream
 
-Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) `master` (fetched 2026-10-27) and the CachyOS installer's `kernelParams: [ "quiet", "nowatchdog" ]`.
+Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) `master` at `f79b237`
+(re-checked file by file on 2026-10-27, on hardware) and the CachyOS installer's
+`kernelParams: [ "quiet", "nowatchdog" ]` (confirmed in `cachyos-calamares`,
+branch `cachyos`, `src/modules/bootloader/bootloader.conf`).
 
 **Corrections to draft v1:**
 - NVMe uses **kyber**, not `none`.
@@ -125,16 +152,17 @@ Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) 
 | `udev/69-hdparm.rules` | rotational ATA disks: `hdparm -B 254 -S 0` | `services.udev.extraRules` with `${pkgs.hdparm}`. Does nothing if there is no HDD. |
 | `udev/40-hpet-permissions.rules`, `99-cpu-dma-latency.rules` | `rtc0` and `hpet` group `audio`; `cpu_dma_latency` 0660 group `audio` | `services.udev.extraRules` |
 | `limits.d/20-audio.conf` | `@audio rtprio 99`, `nice -11` | `security.pam.loginLimits` |
-| `udev/20-audio-pm.rules` | turns off `snd_hda_intel` power saving on AC power | Desktop equivalent: `options snd_hda_intel power_save=0` in `boot.extraModprobeConfig` |
+| `udev/20-audio-pm.rules` + `udev/audio-pm-ctl` | turns off `snd_hda_intel` power saving on AC, restores the stashed value (default 10) on battery | Desktop equivalent: `options snd_hda_intel power_save=0` in `boot.extraModprobeConfig`. This machine has no battery, so only the AC branch would ever run. |
 | `tmpfiles.d/thp.conf`, `thp-shrinker.conf` | THP `defrag=defer+madvise`, `khugepaged/max_ptes_none=409` | `systemd.tmpfiles.rules` (`w!` lines) |
 | `tmpfiles.d/coredump.conf` | coredumps deleted after 3 days | `systemd.tmpfiles.rules` |
 | `modprobe.d/nvidia.conf` | `NVreg_InitializeSystemMemoryAllocations=0` | `boot.extraModprobeConfig` (`hardware/nvidia.nix`) |
 | `udev/71-nvidia.rules` | runtime power management `auto` when the driver binds, `on` when it unbinds | `services.udev.extraRules` (`hardware/nvidia.nix`) |
 | `journald.conf.d/00-journal-size.conf` | `SystemMaxUse=50M` | `services.journald.extraConfig` |
+| `system/rtkit-daemon.service.d/override.conf` | `LogLevelMax=info` | `systemd.services.rtkit-daemon.serviceConfig`, guarded on `security.rtkit.enable` |
 | `system.conf.d/00-timeout.conf`, `user.conf.d/00-timeout.conf` | start 15 s, stop 10 s | systemd manager settings, system and user (exact option name checked against 26.05 when implementing) |
 | `system.conf.d/10-limits.conf`, `user.conf.d/10-limits.conf` | `DefaultLimitNOFILE=2048:2097152` (system), `1024:1048576` (user) | same |
 | `user@.service.d/delegate.conf` | `Delegate=cpu cpuset io memory pids` | `systemd.services."user@".serviceConfig.Delegate` |
-| `system.slice.d/` and `user/slice.d/10-oomd-per-slice-defaults.conf`, `session.slice.d/10-ignore-session-slice.conf` | `ManagedOOMSwap=kill`, `ManagedOOMMemoryPressure=kill`, limit 80%; session slice `ManagedOOMPreference=omit` | `systemd.oomd.{enableSystemSlice,enableUserSlices} = true` plus `ManagedOOMSwap=kill` and the session-slice override, so the result matches upstream exactly |
+| `system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user/slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` | `ManagedOOMSwap=kill`, `ManagedOOMMemoryPressure=kill`, limit 80%; session slice `ManagedOOMPreference=omit` | `systemd.oomd.enable` plus `systemd.slices.system.sliceConfig` and `systemd.user.units.{slice,session.slice}` drop-ins. Note the last two upstream files live under `usr/lib/systemd/**user**/`, so they belong to the *user manager*: `systemd.oomd.enableUserSlices` would instead manage the system-level `user-$UID.slice`, which upstream does not touch. Verified on hardware: `system.slice` and the user manager's `app.slice` report kill/kill/80%, the user manager's `session.slice` reports `ManagedOOMPreference=omit` |
 | `pci-latency.service` | `setpci` latency timers: 20 for everything, 0 for the host bridge, 80 for audio | `systemd.services.pci-latency` (oneshot, `${pkgs.pciutils}`) |
 | `timesyncd.conf.d/10-timesyncd.conf` | NTP `time.cloudflare.com`, fallback Google and Arch pool | `networking.timeServers` |
 | `NetworkManager/conf.d/dns.conf` | `dns=systemd-resolved` | `networking.networkmanager.dns = "systemd-resolved"` + `services.resolved.enable` (`core/networking.nix`) |
@@ -157,26 +185,30 @@ Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) 
 
 ### Phase 1: Flake skeleton, installable base
 1. `flake.nix` and `lib/default.nix`. `mkHost` does the following:
-   - imports `modules/nixos`, `hosts/<name>`, disko, and Home Manager (`useGlobalPkgs`, `useUserPackages`, `backupFileExtension = "hm-bak"`)
+   - imports `modules/nixos`, `hosts/<name>`, and Home Manager (`useGlobalPkgs`, `useUserPackages`, `backupFileExtension = "hm-bak"`)
    - applies the overlays: `nix-cachyos-kernel.overlays.pinned`, plus `unstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; }`
    - passes `inputs` and `vars` through `specialArgs`
-2. `hosts/YUV-PC/disko.nix`:
-   - GPT with a 1 GiB ESP (`/boot`, vfat, `umask=0077`)
-   - btrfs subvolumes `@` `/`, `@home`, `@nix`, `@log` with `compress=zstd:1,noatime`
+2. Disk layout, created by hand from the live USB and then captured by
+   `nixos-generate-config` into `hosts/YUV-PC/hardware.nix`:
+   - GPT with a 1 GiB ESP (`/boot`, vfat, `umask=0077` -> generated as `fmask`/`dmask`)
+   - btrfs subvolumes `@` `/`, `@home`, `@nix`, `@log` with `compress=zstd:1,noatime,nodiscard`
    - no swap partition (zram is used instead)
-   - the disk is referenced by `/dev/disk/by-id`
+   - devices are referenced by filesystem UUID, as the generator writes them
+   - the generator emits only `subvol=` for btrfs, so `compress=zstd:1`, `noatime` and
+     `nodiscard` are re-added to `hardware.nix` after every regeneration
 3. Boot: systemd-boot with `configurationLimit = 10` and `efi.canTouchEfiVariables = true`. Stage 1 runs on systemd, which is the 26.05 default.
-4. Validate: `nix flake check` and `nix build .#nixosConfigurations.YUV-PC.config.system.build.toplevel`. These need Nix: the live USB, NixOS-WSL, or any Linux machine with Nix.
+4. Validate: `nix build path:.#nixosConfigurations.YUV-PC.config.system.build.toplevel`. The `path:` prefix is required, because `lib/env.nix` throws without the untracked `.env`. These need Nix: the live USB, NixOS-WSL, or any Linux machine with Nix.
 
 ### Phase 2: Core
 1. `core/nix.nix`: flakes, caches, `trusted-users = [ "@wheel" ]`, weekly garbage collection, `auto-optimise-store`.
 2. `core/users.nix`:
    - `mutableUsers = false`
    - `root.hashedPassword = "!"`
-   - `fantomtchi7` in `wheel video audio input libvirtd kvm networkmanager`, with `hashedPasswordFile = ../../secrets/fantomtchi7.hash`
+   - `fantomtchi7` in `wheel video audio input libvirtd kvm networkmanager`, with
+     `hashedPassword = env.PASSWORD_HASH` and `openssh.authorizedKeys.keys` from `env.SSH_KEY`
    - sudo asks for a password
 3. `core/networking.nix`: `networking.hostName = "YUV-PC"`, NetworkManager with systemd-resolved, firewall on. OpenSSH with key-only login is **required**: it is the only way into the host while the GPU is passed through.
-4. `core/locale.nix`: timezone and locale from `vars.nix`.
+4. `core/locale.nix`: locale, console keymap and time zone from `.env`; an empty `TIMEZONE` leaves `time.timeZone = null` so systemd-timedated owns the zone (`timedatectl set-timezone` on first boot).
 5. Validate: `nixos-rebuild build-vm`. Login works and root is locked.
 
 ### Phase 3: Kernel and CachyOS stack
@@ -338,8 +370,11 @@ Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) 
 4. Validate: `nix build .#nixosConfigurations.arm-board.config.system.build.toplevel`.
 
 ### Phase 10: Secrets (future)
-- Today the only secret-like file is `secrets/fantomtchi7.hash`, a plaintext yescrypt hash.
-- Later: sops-nix with an age key derived from the SSH host key, `neededForUsers = true`, and `hashedPasswordFile = config.sops.secrets."fantomtchi7-password".path`. No module needs to change.
+- Today nothing secret is in the repo: the only secret file is `/etc/nixos/password.hash` on
+  the target, read during activation.
+- Later: sops-nix with an age key derived from the SSH host key, `neededForUsers = true`, and
+  `hashedPasswordFile = config.sops.secrets."fantomtchi7-password".path`. That is one line in
+  `core/users.nix`; the time zone and SSH keys need nothing, being local state already.
 
 ---
 
@@ -366,17 +401,19 @@ Source: [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) 
 ```bash
 nix-shell -p git
 git clone <repo-url> /tmp/nixos-config && cd /tmp/nixos-config
-# set disk id in hosts/YUV-PC/disko.nix  (ls -l /dev/disk/by-id)
-sudo nix --experimental-features "nix-command flakes" run github:nix-community/disko -- \
-  --mode destroy,format,mount hosts/YUV-PC/disko.nix
-sudo nixos-generate-config --no-filesystems --root /mnt --show-hardware-config > hosts/YUV-PC/hardware.nix
-mkpasswd -m yescrypt > secrets/fantomtchi7.hash
+# partition with gdisk, mkfs.vfat + mkfs.btrfs, create the subvolumes and mount
+# them under /mnt (full sequence in README.md), then:
+sudo nixos-generate-config --root /mnt --show-hardware-config > hosts/YUV-PC/hardware.nix
+# re-add "compress=zstd:1" "noatime" "nodiscard" to the btrfs mounts in hardware.nix
+cp .env.example .env && $EDITOR .env
 git add -A
-sudo nixos-install --flake .#YUV-PC --no-root-passwd \
+sudo nixos-install --flake path:.#YUV-PC --no-root-passwd \
   --option extra-substituters "https://cache.lantian.pub/lantian" \
   --option extra-trusted-public-keys "lantian:WVGO7vsRMSEN+h7Lp7kv6SAmrkEXgUGbbXm7jMDjBuQ="
+sudo install -Dm600 -o 1000 -g 100 <key>.pub /mnt/home/fantomtchi7/.ssh/authorized_keys
 sudo cp -r . /mnt/home/fantomtchi7/nixos-config
 reboot
+# first boot: sudo timedatectl set-timezone Area/City
 ```
 After the first boot, do Phase 8 (Secure Boot enrollment).
 
@@ -406,7 +443,7 @@ After the first boot, do Phase 8 (Secure Boot enrollment).
 | LOW | The lanzaboote stub doesn't measure into PCR 11. | Accept and record it (Phase 8). |
 | LOW | Hyprland picks the NVIDIA card. | `AQ_DRM_DEVICES` symlink (Phase 4). |
 | LOW | Root is locked, so the emergency shell is unavailable. | Live USB + `nixos-enter`; 10 previous generations in the boot menu. |
-| LOW | Plaintext password hash in the repo. | yescrypt hash, private repo until Phase 10. |
+| LOW | The password hash is a plaintext file at `/etc/nixos/password.hash` on the target. | yescrypt hash, mode 0600, outside the repo and outside the store; replaced by sops-nix in Phase 10. |
 
 ---
 

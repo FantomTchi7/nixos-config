@@ -17,8 +17,6 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       (lib.mkIf (cfg.primaryPciAddress != null) {
-        # Aquamarine splits AQ_DRM_DEVICES on ':', so the colon-laden by-path names
-        # cannot be used directly; give the card a stable colon-free alias instead.
         services.udev.extraRules = ''
           SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ENV{ID_PATH}=="pci-${cfg.primaryPciAddress}", SYMLINK+="dri/primary-gpu"
         '';

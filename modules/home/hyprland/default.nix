@@ -2,7 +2,6 @@
   config,
   lib,
   pkgs,
-  vars,
   ...
 }:
 let
@@ -15,30 +14,35 @@ in
   config = lib.mkIf cfg.enable {
     wayland.windowManager.hyprland = {
       enable = true;
-      # Hyprland and its portal come from the NixOS module.
       package = null;
       portalPackage = null;
-      # UWSM manages the systemd session.
       systemd.enable = false;
       configType = "lua";
 
-      settings = {
-        config.input.kb_layout = vars.keyboardLayout;
-      };
-
-      extraConfig = ''
-        require("conf.monitors")
-        require("conf.looks")
-        require("conf.input")
-        require("conf.binds")
-        require("conf.rules")
-      '';
+#       extraConfig = ''
+#         require("conf.monitors")
+#       '';
     };
 
     xdg.configFile."hypr/conf".source = ./conf;
 
-    programs.kitty.enable = true;
-    programs.fuzzel.enable = true;
+    programs.ghostty = {
+      enable = true;
+      enableBashIntegration = true;
+    };
+
+    programs.rofi = {
+      enable = true;
+      package = pkgs.rofi-wayland;
+      extraConfig = {
+        modi = "drun";
+        show-icons = true;
+        drun-display-format = "{icon} {name}";
+        disable-history = false;
+        sidebar-mode = true;
+      };
+    };
+
     services.hyprpolkitagent.enable = true;
 
     home.packages = with pkgs; [

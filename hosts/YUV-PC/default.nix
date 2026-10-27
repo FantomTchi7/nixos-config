@@ -1,32 +1,35 @@
 { inputs, ... }:
 {
   imports = [
-    ./hardware.nix
-    ./disko.nix
     ./gpu.nix
+    ./hardware.nix
   ]
   ++ (with inputs.nixos-hardware.nixosModules; [
-    gigabyte-b550
-    common-cpu-amd
-    common-cpu-amd-pstate
-    common-gpu-amd
     common-pc
     common-pc-ssd
+    common-cpu-amd-pstate
+    common-gpu-amd
+    gigabyte-b550
   ]);
 
   networking.hostName = "YUV-PC";
 
   my = {
+    kernel.cachyos.enable = true;
+
     core.ssh.enable = true;
 
-    kernel.cachyos.enable = true;
+    hardware.zenpower.enable = true;
 
     performance = {
       scx.enable = true;
       ananicy.enable = true;
       zram.enable = true;
       cachyosSettings.enable = true;
+      tuning.enable = true;
     };
+
+    virtualisation.iommu.enable = true;
 
     desktop = {
       hyprland.enable = true;

@@ -1,7 +1,7 @@
 {
   config,
   lib,
-  vars,
+  env,
   ...
 }:
 let
@@ -24,7 +24,7 @@ in
       services.resolved.enable = true;
       networking.firewall.enable = true;
 
-      users.users.${vars.username}.extraGroups = [ "networkmanager" ];
+      users.users.${env.USERNAME}.extraGroups = [ "networkmanager" ];
     })
 
     (lib.mkIf config.my.core.ssh.enable {
@@ -36,10 +36,6 @@ in
           PermitRootLogin = "no";
         };
       };
-
-      warnings = lib.optional (vars.sshKeys == [ ]) ''
-        my.core.ssh is enabled but lib/vars.nix has no sshKeys, so nobody can log in over SSH.
-      '';
     })
   ];
 }

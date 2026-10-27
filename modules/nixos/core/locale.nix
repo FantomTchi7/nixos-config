@@ -1,7 +1,7 @@
 {
   config,
   lib,
-  vars,
+  env,
   ...
 }:
 let
@@ -9,15 +9,14 @@ let
 in
 {
   options.my.core.locale.enable =
-    lib.mkEnableOption "time zone, locale and keyboard layout from lib/vars.nix"
+    lib.mkEnableOption "time zone, locale and console keymap from .env"
     // {
       default = true;
     };
 
   config = lib.mkIf cfg.enable {
-    time.timeZone = vars.timeZone;
-    i18n.defaultLocale = vars.locale;
-    console.keyMap = vars.keyboardLayout;
-    services.xserver.xkb.layout = vars.keyboardLayout;
+    time.timeZone = if env.TIMEZONE == "" then null else env.TIMEZONE;
+    i18n.defaultLocale = env.LOCALE;
+    console.keyMap = env.KEYBOARD_LAYOUT;
   };
 }

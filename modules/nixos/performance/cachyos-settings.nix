@@ -12,7 +12,6 @@ in
     lib.mkEnableOption "CachyOS sysctl, udev, systemd and kernel defaults";
 
   config = lib.mkIf cfg.enable {
-    # sysctl.d/70-cachyos-settings.conf
     boot.kernel.sysctl = {
       "vm.swappiness" = lib.mkDefault 100;
       "vm.vfs_cache_pressure" = 50;
@@ -29,24 +28,19 @@ in
       "kernel.sysrq" = 1;
     };
 
-    # CachyOS installer (cachyos-calamares bootloader.conf)
     boot.kernelParams = [
       "quiet"
       "nowatchdog"
     ];
 
-    # modprobe.d/blacklist.conf
     boot.blacklistedKernelModules = [
       "iTCO_wdt"
       "sp5100_tco"
       "wdat_wdt"
     ];
 
-    # modules-load.d/ntsync.conf
     boot.kernelModules = [ "ntsync" ];
 
-    # udev/rules.d/20-audio-pm.rules: on AC power CachyOS turns HDA power saving off;
-    # a desktop is always on AC.
     boot.extraModprobeConfig = ''
       options snd_hda_intel power_save=0
     '';
@@ -71,7 +65,6 @@ in
       DEVPATH=="/devices/virtual/misc/cpu_dma_latency", OWNER="root", GROUP="audio", MODE="0660"
     '';
 
-    # limits.d/20-audio.conf
     security.pam.loginLimits = [
       {
         domain = "@audio";
@@ -88,37 +81,33 @@ in
     ];
 
     systemd.tmpfiles.rules = [
-      # tmpfiles.d/thp.conf
       "w! /sys/kernel/mm/transparent_hugepage/defrag - - - - defer+madvise"
-      # tmpfiles.d/thp-shrinker.conf
       "w! /sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none - - - - 409"
-      # tmpfiles.d/coredump.conf
       "e /var/lib/systemd/coredump - - - 3d"
     ];
 
-    # journald.conf.d/00-journal-size.conf
     services.journald.extraConfig = ''
       SystemMaxUse=50M
     '';
 
-    # system.conf.d/00-timeout.conf, system.conf.d/10-limits.conf
+    systemd.services.rtkit-daemon = lib.mkIf config.security.rtkit.enable {
+      serviceConfig.LogLevelMax = "info";
+    };
+
     systemd.settings.Manager = {
       DefaultTimeoutStartSec = "15s";
       DefaultTimeoutStopSec = "10s";
       DefaultLimitNOFILE = "2048:2097152";
     };
 
-    # user.conf.d/00-timeout.conf, user.conf.d/10-limits.conf
     systemd.user.extraConfig = ''
       DefaultTimeoutStartSec=15s
       DefaultTimeoutStopSec=10s
       DefaultLimitNOFILE=1024:1048576
     '';
 
-    # system/user@.service.d/delegate.conf
     systemd.services."user@".serviceConfig.Delegate = "cpu cpuset io memory pids";
 
-    # system/system.slice.d, user/slice.d and user/session.slice.d oomd defaults
     systemd.oomd.enable = true;
     systemd.slices.system.sliceConfig = {
       ManagedOOMSwap = "kill";
@@ -144,7 +133,6 @@ in
       };
     };
 
-    # system/pci-latency.service + bin/pci-latency
     systemd.services.pci-latency = {
       description = "Adjust latency timers for PCI peripherals";
       wantedBy = [ "multi-user.target" ];
@@ -157,7 +145,6 @@ in
       '';
     };
 
-    # timesyncd.conf.d/10-timesyncd.conf
     services.timesyncd = {
       servers = [ "time.cloudflare.com" ];
       fallbackServers = [

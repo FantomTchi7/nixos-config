@@ -7,5 +7,6 @@
     ./hardware
     ./kernel
     ./performance
+    ./virtualisation
   ];
 }

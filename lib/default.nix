@@ -1,10 +1,10 @@
 { inputs }:
 let
   inherit (inputs.nixpkgs) lib;
-  vars = import ./vars.nix;
+  env = import ./env.nix { inherit lib; };
 in
 {
-  inherit vars;
+  inherit env;
 
   mkHost =
     {
@@ -13,12 +13,17 @@ in
       extraModules ? [ ],
     }:
     lib.nixosSystem {
-      specialArgs = { inherit inputs vars hostname; };
+      specialArgs = {
+        inherit
+          inputs
+          env
+          hostname
+          ;
+      };
       modules = [
         { nixpkgs.hostPlatform = system; }
         ../modules/nixos
         ../hosts/${hostname}
-        inputs.disko.nixosModules.disko
         inputs.home-manager.nixosModules.home-manager
         {
           nixpkgs.overlays = import ../overlays { inherit inputs; };
@@ -27,8 +32,8 @@ in
             useGlobalPkgs = true;
             useUserPackages = true;
             backupFileExtension = "hm-bak";
-            extraSpecialArgs = { inherit inputs vars hostname; };
-            users.${vars.username} = import ../users/${vars.username}/home.nix;
+            extraSpecialArgs = { inherit inputs env hostname; };
+            users.${env.USERNAME} = import ../users/${env.USERNAME}/home.nix;
           };
         }
       ]

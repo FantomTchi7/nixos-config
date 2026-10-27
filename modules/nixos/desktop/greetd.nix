@@ -2,7 +2,7 @@
   config,
   lib,
   pkgs,
-  vars,
+  env,
   ...
 }:
 let
@@ -34,7 +34,7 @@ in
       }
       // lib.optionalAttrs cfg.autologin {
         initial_session = {
-          user = vars.username;
+          user = env.USERNAME;
           command = session;
         };
       };

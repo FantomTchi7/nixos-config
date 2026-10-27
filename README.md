@@ -1,57 +1,118 @@
-# nixos-config
-
-Modular NixOS flake for **YUV-PC** (Ryzen 7 5700X, B550 Aorus Elite V2, RX 6900 XT + GTX 1050 Ti).
-Base channel is `nixos-26.05`; `pkgs.unstable` is available for packages picked on purpose.
-See [PLAN.md](PLAN.md) for the full roadmap.
-
-## Layout
-
-| Path | Purpose |
-|---|---|
-| `flake.nix` | inputs and `nixosConfigurations` |
-| `lib/` | `mkHost` helper and shared variables (`vars.nix`) |
-| `hosts/<name>/` | per-host hardware, disks and `my.*` toggles |
-| `modules/nixos/` | system modules, each behind a `my.*` option |
-| `modules/home/` | Home Manager modules |
-| `users/<name>/home.nix` | per-user Home Manager entry point |
-| `overlays/` | `pkgs.unstable` and local package overlays |
-| `secrets/` | plaintext for now, see `secrets/README.md` |
-
 ## Install from the NixOS live USB
 
 ```bash
-nix-shell -p git
-git clone <repo-url> /tmp/nixos-config && cd /tmp/nixos-config
-
-# 1. Set the target disk in hosts/YUV-PC/disko.nix (ls -l /dev/disk/by-id)
-# 2. Set timeZone, locale, keyboardLayout and sshKeys in lib/vars.nix
-
-# 3. Partition, format and mount
-sudo nix --experimental-features "nix-command flakes" run github:nix-community/disko -- \
-  --mode destroy,format,mount --flake .#YUV-PC
-
-# 4. Hardware config (filesystems are owned by disko)
-sudo nixos-generate-config --no-filesystems --root /mnt --show-hardware-config > hosts/YUV-PC/hardware.nix
-
-# 5. User password hash (root stays locked)
-mkpasswd -m yescrypt > secrets/fantomtchi7.hash
-
-# 6. Flakes only see tracked files
-git add -A
-
-# 7. Install without a root password
-sudo nixos-install --flake .#YUV-PC --no-root-passwd \
-  --option extra-substituters "https://cache.lantian.pub/lantian" \
-  --option extra-trusted-public-keys "lantian:WVGO7vsRMSEN+h7Lp7kv6SAmrkEXgUGbbXm7jMDjBuQ="
-
-sudo cp -r . /mnt/home/fantomtchi7/nixos-config
-reboot
+sudo gdisk /dev/nvme0n1
 ```
 
-## Day to day
 
 ```bash
-sudo nixos-rebuild switch --flake ~/nixos-config#YUV-PC
-nix flake update   # deliberate input bumps
-nix fmt            # format with nixfmt
+sudo mkfs.vfat -F32 /dev/nvme0n1p1
+```
+
+```bash
+sudo mkfs.btrfs -f /dev/nvme0n1p2
+```
+
+```bash
+sudo mount /dev/nvme0n1p2 /mnt
+```
+
+```bash
+sudo btrfs subvolume create /mnt/@
+```
+
+```bash
+sudo btrfs subvolume create /mnt/@home
+```
+
+```bash
+sudo btrfs subvolume create /mnt/@nix
+```
+
+```bash
+sudo btrfs subvolume create /mnt/@log
+```
+
+```bash
+sudo umount /mnt
+```
+
+
+```bash
+O=compress=zstd:1,noatime,nodiscard
+```
+
+```bash
+sudo mount -o $O,subvol=@ /dev/nvme0n1p2 /mnt
+```
+
+```bash
+sudo mkdir -p /mnt/{boot,home,nix,var/log}
+```
+
+```bash
+sudo mount -o $O,subvol=@home /dev/nvme0n1p2 /mnt/home
+```
+
+```bash
+sudo mount -o $O,subvol=@nix  /dev/nvme0n1p2 /mnt/nix
+```
+
+```bash
+sudo mount -o $O,subvol=@log  /dev/nvme0n1p2 /mnt/var/log
+```
+
+```bash
+sudo mount -o umask=0077 /dev/nvme0n1p1 /mnt/boot
+```
+
+
+```bash
+cp .env.example .env
+```
+
+```bash
+# mkpasswd -m yescrypt
+```
+
+```bash
+vim .env
+```
+
+
+```bash
+sudo nixos-generate-config --root /mnt --show-hardware-config > hosts/YUV-PC/hardware.nix
+```
+
+
+```bash
+# "compress=zstd:1" "noatime" "nodiscard"
+```
+
+```bash
+vim hosts/YUV-PC/hardware.nix
+```
+
+
+```bash
+git add .
+```
+
+
+```bash
+sudo nixos-install --flake path:.#YUV-PC --no-root-passwd --option extra-substituters "https://cache.lantian.pub/lantian" --option extra-trusted-public-keys "lantian:WVGO7vsRMSEN+h7Lp7kv6SAmrkEXgUGbbXm7jMDjBuQ="
+```
+
+
+```bash
+sudo cp -r . /mnt/home/fantomtchi7/nixos-config
+```
+
+```bash
+sudo chown -R 1000:100 /mnt/home/fantomtchi7/nixos-config
+```
+
+
+```bash
+reboot
 ```

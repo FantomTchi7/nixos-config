@@ -10,11 +10,6 @@
 
     nixos-hardware.url = "github:NixOS/nixos-hardware";
 
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
   };
 
